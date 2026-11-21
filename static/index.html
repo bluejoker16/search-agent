@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小知 · 知识库智能问答助手</title>
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --panel: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --primary: #2563eb;
+    --primary-soft: #eff6ff;
+    --border: #e5e7eb;
+    --user-bubble: #2563eb;
+    --ai-bubble: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+  }
+  .app {
+    width: 100%;
+    max-width: 860px;
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 40px rgba(37, 99, 235, .06);
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg, #2563eb, #60a5fa);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px;
+  }
+  h1 { font-size: 17px; margin: 0; }
+  .subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; }
+  .dot.off { background: #ef4444; }
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    background: var(--bg);
+  }
+  .msg { display: flex; gap: 10px; margin-bottom: 18px; align-items: flex-start; }
+  .msg.user { flex-direction: row-reverse; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 9px; flex: 0 0 30px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+  }
+  .msg.user .avatar { background: var(--primary-soft); color: var(--primary); }
+  .msg.ai .avatar { background: linear-gradient(135deg,#2563eb,#60a5fa); color: #fff; }
+  .bubble {
+    max-width: 76%;
+    padding: 12px 16px;
+    border-radius: 14px;
+    line-height: 1.75;
+    font-size: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user .bubble { background: var(--user-bubble); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.ai .bubble { background: var(--ai-bubble); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg.ai .bubble.error { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+  .cursor::after { content: "▍"; animation: blink 1s step-end infinite; color: var(--primary); }
+  @keyframes blink { 50% { opacity: 0; } }
+  .evidence {
+    margin-top: 10px; font-size: 12px; color: var(--muted);
+    border-top: 1px dashed var(--border); padding-top: 8px;
+  }
+  .evidence summary { cursor: pointer; color: var(--primary); outline: none; }
+  .evidence pre {
+    white-space: pre-wrap; word-break: break-word; background: var(--primary-soft);
+    padding: 10px; border-radius: 8px; margin: 8px 0 0; line-height: 1.6;
+  }
+  footer { border-top: 1px solid var(--border); padding: 14px 24px 18px; }
+  .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .quick button {
+    border: 1px solid var(--border); background: #fff; color: var(--muted);
+    padding: 5px 11px; border-radius: 20px; font-size: 12px; cursor: pointer;
+  }
+  .quick button:hover { border-color: var(--primary); color: var(--primary); }
+  .row { display: flex; gap: 10px; align-items: center; }
+  textarea {
+    flex: 1; resize: none; height: 44px; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: 10px;
+    font: inherit; font-size: 14px; outline: none;
+  }
+  textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+  .send {
+    background: var(--primary); color: #fff; border: none; border-radius: 10px;
+    padding: 0 22px; height: 44px; font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  .send:disabled { background: #93c5fd; cursor: not-allowed; }
+  .toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .welcome { text-align: center; color: var(--muted); margin-top: 60px; font-size: 14px; line-height: 2; }
+  .welcome .big { font-size: 22px; color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="logo">知</div>
+      <div>
+        <h1>小知 · 知识库智能问答</h1>
+        <div class="subtitle">LangChain 1.0 + FastAPI + RAG</div>
+      </div>
+    </div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">检测中...</span></div>
+  </header>
+
+  <main id="messages">
+    <div class="welcome">
+      <div class="big">你好，我是小知 👋</div>
+      <div>我基于公司内部知识库回答问题，每个答案都可以查看检索证据。</div>
+      <div>试试下面的快捷问题，或直接输入你的问题。</div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="quick">
+      <button onclick="ask('产品有哪些核心功能？')">产品有哪些核心功能？</button>
+      <button onclick="ask('标准版价格是多少？')">标准版价格是多少？</button>
+      <button onclick="ask('支持哪些部署方式？')">支持哪些部署方式？</button>
+      <button onclick="ask('如何申请售后服务？')">如何申请售后服务？</button>
+    </div>
+    <div class="row">
+      <textarea id="input" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行"></textarea>
+      <label class="toggle"><input type="checkbox" id="showEvidence" checked>检索证据</label>
+      <button class="send" id="sendBtn" onclick="send()">发送</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+const MSG = document.getElementById('messages');
+const INPUT = document.getElementById('input');
+const SEND = document.getElementById('sendBtn');
+const EVIDENCE = document.getElementById('showEvidence');
+let threadId = sessionStorage.getItem('threadId');
+if (!threadId) {
+  threadId = 'session-' + Math.random().toString(36).slice(2, 10);
+  sessionStorage.setItem('threadId', threadId);
+}
+
+fetch('/api/health').then(r => r.json()).then(d => {
+  document.getElementById('dot').className = 'dot' + (d.agent_ready ? '' : ' off');
+  document.getElementById('statusText').textContent = d.agent_ready ? '服务就绪' : '未配置 Key';
+}).catch(() => {
+  document.getElementById('dot').className = 'dot off';
+  document.getElementById('statusText').textContent = '服务不可用';
+});
+
+INPUT.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function addMessage(role, text) {
+  const wrap = el('div', 'msg ' + role);
+  wrap.appendChild(el('div', 'avatar', role === 'user' ? '我' : '知'));
+  const bubble = el('div', 'bubble', text || '');
+  if (role === 'ai') bubble.classList.add('cursor');
+  wrap.appendChild(bubble);
+  MSG.appendChild(wrap);
+  MSG.scrollTop = MSG.scrollHeight;
+  return { wrap, bubble };
+}
+
+function addEvidence(wrap, docs) {
+  if (!docs || !docs.length) return;
+  const box = el('details', 'evidence');
+  box.appendChild(el('summary', null, `查看检索证据（${docs.length} 个片段）`));
+  const pre = el('pre', null, docs.map((d, i) =>
+    `【片段${i + 1}｜来源：${d.source}】\n${d.content}`).join('\n\n'));
+  box.appendChild(pre);
+  wrap.appendChild(box);
+  MSG.scrollTop = MSG.scrollHeight;
+}
+
+function ask(q) { INPUT.value = q; send(); }
+
+async function send() {
+  const question = INPUT.value.trim();
+  if (!question || SEND.disabled) return;
+  INPUT.value = '';
+  SEND.disabled = true;
+
+  const initial = MSG.querySelector('.welcome');
+  if (initial) initial.remove();
+  addMessage('user', question);
+  const { wrap, bubble } = addMessage('ai', '');
+
+  // 并行拿检索片段，用于展示「答案来自哪里」
+  if (EVIDENCE.checked) {
+    fetch('/api/retrieve', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question, thread_id: threadId})
+    }).then(r => r.json()).then(d => addEvidence(wrap, d.docs)).catch(() => {});
+  }
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question, thread_id: threadId})
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({error: '请求失败'}));
+      throw new Error(d.error || ('HTTP ' + res.status));
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', answer = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        const data = JSON.parse(line.slice(5).trim());
+        if (data.error) throw new Error(data.error);
+        if (data.delta) {
+          answer += data.delta;
+          bubble.textContent = answer;
+          MSG.scrollTop = MSG.scrollHeight;
+        }
+      }
+    }
+    bubble.classList.remove('cursor');
+    if (!answer) bubble.textContent = '（模型没有返回内容）';
+  } catch (e) {
+    bubble.classList.remove('cursor');
+    bubble.classList.add('error');
+    bubble.textContent = '请求失败：' + e.message;
+  } finally {
+    SEND.disabled = false;
+    INPUT.focus();
+  }
+}
+</script>
+</body>
+</html>
