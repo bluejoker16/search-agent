@@ -3,18 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>小知 · 知识库智能问答助手</title>
+<title>玄机 · 赛博算命知识库</title>
 <style>
   :root {
-    --bg: #f5f7fb;
-    --panel: #ffffff;
-    --text: #1f2937;
-    --muted: #6b7280;
-    --primary: #2563eb;
-    --primary-soft: #eff6ff;
-    --border: #e5e7eb;
-    --user-bubble: #2563eb;
-    --ai-bubble: #ffffff;
+    --bg: #0a0e1a;
+    --panel: #111827;
+    --panel-2: #1a2237;
+    --text: #e5e7eb;
+    --muted: #8b93a7;
+    --cyan: #22d3ee;
+    --purple: #a78bfa;
+    --border: #2a3450;
+    --user-bubble: #4c1d95;
+    --ai-bubble: #141c30;
   }
   * { box-sizing: border-box; }
   body {
@@ -32,7 +33,8 @@
     background: var(--panel);
     display: flex;
     flex-direction: column;
-    box-shadow: 0 0 40px rgba(37, 99, 235, .06);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
   }
   header {
     padding: 16px 24px;
@@ -40,89 +42,90 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    background: linear-gradient(90deg, #111827, #1a1533);
   }
-  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
   .logo {
-    width: 34px; height: 34px; border-radius: 10px;
-    background: linear-gradient(135deg, #2563eb, #60a5fa);
-    color: #fff; display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 15px;
+    width: 38px; height: 38px; border-radius: 10px;
+    border: 1px solid var(--cyan);
+    color: var(--cyan); display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 500;
+    box-shadow: 0 0 12px rgba(34, 211, 238, .25);
   }
-  h1 { font-size: 17px; margin: 0; }
-  .subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: 1px; }
+  .subtitle { font-size: 12px; color: var(--muted); margin-top: 3px; }
   .status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; }
-  .dot.off { background: #ef4444; }
-  main {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    background: var(--bg);
-  }
-  .msg { display: flex; gap: 10px; margin-bottom: 18px; align-items: flex-start; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .dot.off { background: #ef4444; box-shadow: none; }
+  main { flex: 1; overflow-y: auto; padding: 24px; background: var(--bg); }
+  .msg { display: flex; gap: 10px; margin-bottom: 20px; align-items: flex-start; }
   .msg.user { flex-direction: row-reverse; }
   .avatar {
     width: 30px; height: 30px; border-radius: 9px; flex: 0 0 30px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 600;
+    font-size: 12px; font-weight: 500; border: 1px solid var(--border);
   }
-  .msg.user .avatar { background: var(--primary-soft); color: var(--primary); }
-  .msg.ai .avatar { background: linear-gradient(135deg,#2563eb,#60a5fa); color: #fff; }
+  .msg.user .avatar { background: var(--user-bubble); color: #e9d5ff; border-color: #6d28d9; }
+  .msg.ai .avatar { background: var(--panel-2); color: var(--cyan); border-color: var(--cyan); }
   .bubble {
-    max-width: 76%;
-    padding: 12px 16px;
+    max-width: 78%;
+    padding: 13px 16px;
     border-radius: 14px;
-    line-height: 1.75;
+    line-height: 1.85;
     font-size: 14px;
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .msg.user .bubble { background: var(--user-bubble); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.user .bubble { background: var(--user-bubble); color: #f5f3ff; border-bottom-right-radius: 4px; }
   .msg.ai .bubble { background: var(--ai-bubble); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-  .msg.ai .bubble.error { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
-  .cursor::after { content: "▍"; animation: blink 1s step-end infinite; color: var(--primary); }
+  .msg.ai .bubble.error { border-color: #7f1d1d; color: #fca5a5; }
+  .cursor::after { content: "▍"; animation: blink 1s step-end infinite; color: var(--cyan); }
   @keyframes blink { 50% { opacity: 0; } }
   .evidence {
     margin-top: 10px; font-size: 12px; color: var(--muted);
     border-top: 1px dashed var(--border); padding-top: 8px;
   }
-  .evidence summary { cursor: pointer; color: var(--primary); outline: none; }
+  .evidence summary { cursor: pointer; color: var(--purple); outline: none; }
+  .evidence .cat { color: var(--cyan); margin: 8px 0 4px; font-weight: 500; }
   .evidence pre {
-    white-space: pre-wrap; word-break: break-word; background: var(--primary-soft);
-    padding: 10px; border-radius: 8px; margin: 8px 0 0; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word; background: var(--panel-2);
+    padding: 10px; border-radius: 8px; margin: 4px 0; line-height: 1.6;
+    color: var(--muted); border-left: 2px solid var(--purple);
   }
-  footer { border-top: 1px solid var(--border); padding: 14px 24px 18px; }
+  footer { border-top: 1px solid var(--border); padding: 14px 24px 18px; background: var(--panel); }
   .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   .quick button {
-    border: 1px solid var(--border); background: #fff; color: var(--muted);
-    padding: 5px 11px; border-radius: 20px; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+    padding: 6px 12px; border-radius: 20px; font-size: 12px; cursor: pointer;
   }
-  .quick button:hover { border-color: var(--primary); color: var(--primary); }
+  .quick button:hover { border-color: var(--cyan); color: var(--cyan); }
   .row { display: flex; gap: 10px; align-items: center; }
   textarea {
     flex: 1; resize: none; height: 44px; padding: 12px 14px;
     border: 1px solid var(--border); border-radius: 10px;
     font: inherit; font-size: 14px; outline: none;
+    background: var(--panel-2); color: var(--text);
   }
-  textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+  textarea:focus { border-color: var(--cyan); }
+  textarea::placeholder { color: var(--muted); }
   .send {
-    background: var(--primary); color: #fff; border: none; border-radius: 10px;
-    padding: 0 22px; height: 44px; font-size: 14px; cursor: pointer; font-weight: 600;
+    background: var(--cyan); color: #06212a; border: none; border-radius: 10px;
+    padding: 0 22px; height: 44px; font-size: 14px; cursor: pointer; font-weight: 500;
   }
-  .send:disabled { background: #93c5fd; cursor: not-allowed; }
+  .send:disabled { background: #155e75; color: #94a3b8; cursor: not-allowed; }
   .toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-  .welcome { text-align: center; color: var(--muted); margin-top: 60px; font-size: 14px; line-height: 2; }
-  .welcome .big { font-size: 22px; color: var(--text); font-weight: 600; }
+  .welcome { text-align: center; color: var(--muted); margin-top: 50px; font-size: 14px; line-height: 2; }
+  .welcome .big { font-size: 22px; color: var(--cyan); font-weight: 500; letter-spacing: 2px; }
 </style>
 </head>
 <body>
 <div class="app">
   <header>
     <div class="brand">
-      <div class="logo">知</div>
+      <div class="logo">卦</div>
       <div>
-        <h1>小知 · 知识库智能问答</h1>
-        <div class="subtitle">LangChain 1.0 + FastAPI + RAG</div>
+        <h1>玄机 · 赛博算命</h1>
+        <div class="subtitle">心理学 × 易经 · 双视角 RAG</div>
       </div>
     </div>
     <div class="status"><span class="dot" id="dot"></span><span id="statusText">检测中...</span></div>
@@ -130,23 +133,23 @@
 
   <main id="messages">
     <div class="welcome">
-      <div class="big">你好，我是小知 👋</div>
-      <div>我基于公司内部知识库回答问题，每个答案都可以查看检索证据。</div>
-      <div>试试下面的快捷问题，或直接输入你的问题。</div>
+      <div class="big">玄机 · 双象解忧</div>
+      <div>说出你的困扰，我从心理学、易经两个维度为你解读。</div>
+      <div>每个答案都附两路检索依据，可展开查看。</div>
     </div>
   </main>
 
   <footer>
     <div class="quick">
-      <button onclick="ask('产品有哪些核心功能？')">产品有哪些核心功能？</button>
-      <button onclick="ask('标准版价格是多少？')">标准版价格是多少？</button>
-      <button onclick="ask('支持哪些部署方式？')">支持哪些部署方式？</button>
-      <button onclick="ask('如何申请售后服务？')">如何申请售后服务？</button>
+      <button onclick="ask('我最近失眠，心里很焦虑，压力大')">失眠 · 焦虑 · 压力大</button>
+      <button onclick="ask('我总是心慌，坐立不安')">心慌 · 坐立不安</button>
+      <button onclick="ask('考试前特别紧张，手心出汗')">考试紧张 · 手心出汗</button>
+      <button onclick="ask('感情不顺，心里闷闷不乐')">感情不顺 · 情绪低落</button>
     </div>
     <div class="row">
-      <textarea id="input" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行"></textarea>
-      <label class="toggle"><input type="checkbox" id="showEvidence" checked>检索证据</label>
-      <button class="send" id="sendBtn" onclick="send()">发送</button>
+      <textarea id="input" placeholder="说出你的困扰…… Enter 发送，Shift+Enter 换行"></textarea>
+      <label class="toggle"><input type="checkbox" id="showEvidence" checked>卜卦依据</label>
+      <button class="send" id="sendBtn" onclick="send()">起卦</button>
     </div>
   </footer>
 </div>
@@ -164,7 +167,7 @@ if (!threadId) {
 
 fetch('/api/health').then(r => r.json()).then(d => {
   document.getElementById('dot').className = 'dot' + (d.agent_ready ? '' : ' off');
-  document.getElementById('statusText').textContent = d.agent_ready ? '服务就绪' : '未配置 Key';
+  document.getElementById('statusText').textContent = d.agent_ready ? '玄机已就位' : '未配置 Key';
 }).catch(() => {
   document.getElementById('dot').className = 'dot off';
   document.getElementById('statusText').textContent = '服务不可用';
@@ -183,7 +186,7 @@ function el(tag, cls, text) {
 
 function addMessage(role, text) {
   const wrap = el('div', 'msg ' + role);
-  wrap.appendChild(el('div', 'avatar', role === 'user' ? '我' : '知'));
+  wrap.appendChild(el('div', 'avatar', role === 'user' ? '我' : '卦'));
   const bubble = el('div', 'bubble', text || '');
   if (role === 'ai') bubble.classList.add('cursor');
   wrap.appendChild(bubble);
@@ -192,13 +195,22 @@ function addMessage(role, text) {
   return { wrap, bubble };
 }
 
-function addEvidence(wrap, docs) {
-  if (!docs || !docs.length) return;
+function addEvidence(wrap, groups) {
+  if (!groups || !groups.length) return;
   const box = el('details', 'evidence');
-  box.appendChild(el('summary', null, `查看检索证据（${docs.length} 个片段）`));
-  const pre = el('pre', null, docs.map((d, i) =>
-    `【片段${i + 1}｜来源：${d.source}】\n${d.content}`).join('\n\n'));
-  box.appendChild(pre);
+  const total = groups.reduce((s, g) => s + (g.docs ? g.docs.length : 0), 0);
+  box.appendChild(el('summary', null, `查看卜卦依据（${groups.length} 路 · ${total} 条）`));
+  groups.forEach(g => {
+    box.appendChild(el('div', 'cat', '【' + g.category + '】'));
+    if (g.hit === false) {
+      box.appendChild(el('pre', null, '（知识库未命中，该角度由模型基于通用知识作答）'));
+      return;
+    }
+    (g.docs || []).forEach(d => {
+      const pre = el('pre', null, d.content.replace(/#/g, '').trim());
+      box.appendChild(pre);
+    });
+  });
   wrap.appendChild(box);
   MSG.scrollTop = MSG.scrollHeight;
 }
@@ -215,14 +227,6 @@ async function send() {
   if (initial) initial.remove();
   addMessage('user', question);
   const { wrap, bubble } = addMessage('ai', '');
-
-  // 并行拿检索片段，用于展示「答案来自哪里」
-  if (EVIDENCE.checked) {
-    fetch('/api/retrieve', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({question, thread_id: threadId})
-    }).then(r => r.json()).then(d => addEvidence(wrap, d.docs)).catch(() => {});
-  }
 
   try {
     const res = await fetch('/api/chat', {
@@ -247,6 +251,8 @@ async function send() {
         if (!line.startsWith('data:')) continue;
         const data = JSON.parse(line.slice(5).trim());
         if (data.error) throw new Error(data.error);
+        // 证据由 /api/chat 随 Agent 实际检索结果一起回传，与回答同源
+        if (data.evidence && EVIDENCE.checked) addEvidence(wrap, data.evidence);
         if (data.delta) {
           answer += data.delta;
           bubble.textContent = answer;
@@ -255,11 +261,11 @@ async function send() {
       }
     }
     bubble.classList.remove('cursor');
-    if (!answer) bubble.textContent = '（模型没有返回内容）';
+    if (!answer) bubble.textContent = '（卦象未显示，请再试一次）';
   } catch (e) {
     bubble.classList.remove('cursor');
     bubble.classList.add('error');
-    bubble.textContent = '请求失败：' + e.message;
+    bubble.textContent = '起卦失败：' + e.message;
   } finally {
     SEND.disabled = false;
     INPUT.focus();

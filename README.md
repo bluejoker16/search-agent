@@ -1,51 +1,54 @@
-# LangChain 1.0 RAG 智能问答助手（面试项目）
+# 赛博算命 · 心理 × 易经（LangChain 1.0 RAG 面试项目）
 
-一个**能在 3 分钟内讲清楚**的企业知识库问答项目：Flask 式的极简分层，用 LangChain 1.0 新写法（`create_agent` + `@tool` + `init_chat_model`）串起完整 RAG 链路，FastAPI 提供流式接口，原生 HTML 做前端，**不引入 Vue/React，不搞微服务**。
+一个**能从两个知识库同时解读用户困扰**的 RAG 项目：用户说"我最近失眠、焦虑、压力大"，系统分别从**心理学、易经**检索证据，再由 DeepSeek-V4-Flash 综合成一段神秘但不吓人的解读。原生 HTML 前端，三个 Python 文件，无 Vue/React，clone 下来 3 分钟能跑。
 
-> 面向面试：代码量小（3 个 Python 文件 + 1 个 HTML），每个文件职责单一，可以随时打开给面试官看。README 末尾准备了 12 个高频追问及回答要点。
+> 面试价值：相比普通单库 RAG，这个项目多&#x4E86;**"多路检索 + 结果融合"**&#x8BBE;计，是很好的加分点。README 末尾准备了 14 个高频追问及回答要点。
+
+> 关于知识库的取舍：早期版本还有"周公解梦"第三路，但很多用户并不做梦、也不会带着梦境来提问，解梦视角反而跑偏。因此收敛为**心理学（科学解释）+ 易经（玄学意象）**&#x4E24;路——一理性一感性，既覆盖绝大多数情绪困扰，又不强加用户没有的场景。**这个"做减法"的产品判断本身也是面试可讲的点：RAG 的知识库不是越多越好，要贴合真实用户问题分布。**
 
 ---
 
 ## 一、技术栈
 
-| 层 | 技术 | 版本 |
-|---|---|---|
-| 大模型 | DeepSeek-V4-Flash（经硅基流动，OpenAI 兼容协议） | deepseek-ai/DeepSeek-V4-Flash |
-| Agent 编排 | LangChain `create_agent` | 1.x |
-| 模型初始化 | `init_chat_model` | 1.x |
-| 检索工具化 | `@tool` + `InMemoryVectorStore` | langchain-core 1.x |
-| 文档切块 | `RecursiveCharacterTextSplitter` | langchain-text-splitters |
-| Web 框架 | FastAPI + uvicorn | 0.110+ |
-| 前端 | 原生 HTML / CSS / JS + SSE | 零构建 |
+| 层        | 技术                                   | 版本                            |
+| -------- | ------------------------------------ | ----------------------------- |
+| 大模型      | DeepSeek-V4-Flash（经硅基流动，OpenAI 兼容协议） | deepseek-ai/DeepSeek-V4-Flash |
+| Agent 编排 | LangChain `create_agent`             | 1.x                           |
+| 模型初始化    | `init_chat_model`                    | 1.x                           |
+| 检索工具化    | `@tool` + 两个混合检索器                | langchain-core 1.x            |
+| **混合检索**  | **BM25（自实现）+ 向量，RRF 融合**        | 零新依赖                         |
+| 文档切块     | `RecursiveCharacterTextSplitter`     | langchain-text-splitters      |
+| Web 框架   | FastAPI + uvicorn                    | 0.110+                        |
+| 前端       | 原生 HTML / CSS / JS + SSE             | 零构建                           |
 
-**Embedding 双模式**（这是项目的设计亮点）：
-- 不配 Key：本地字符 bigram 哈希向量，**零成本跑通全链路**
-- 配了 Key（硅基流动，问答和向量化共用一个）：问答用 `DeepSeek-V4-Flash`，向量用免费 BGE-M3，**真实语义检索**
+**检索 = BM25 + 向量 混合（`.env` 里 `ENABLE_BM25` 切换）**
+
+每一路知识库内部都不是单一检索，而是两路结果用 **RRF（Reciprocal Rank Fusion）** 融合：
+
+- **BM25**（`ingest.py` 自实现，零新依赖）：字面精确匹配，靠 IDF 压低"焦虑/压力"这类每条都有的模板词权重。实测区分度极强——不相关条目直接 0 分。
+- **向量**：`EMBEDDING_MODE` 可选 `local`（本地字符 bigram 哈希，默认）或 `bge`（硅基流动 bge-m3 语义向量），负责语义泛化（如"感情不顺"→"亲密关系焦虑"）。
+- **RRF 融合**：`score(d) = Σ 1/(60 + rank)`，只用排名不用分数，天然规避 BM25 与 cosine 分数尺度不一致的问题。
+
+> **为什么混合**：实测纯本地哈希对"考试紧张"返回 0.396/0.243/0.147——后两条分数接近、弱相关，硬塞进 Top-3 反而干扰模型；BM25 给的是 18.07/5.29/2.83/0，不相关直接归零。但 BM25 抓不到语义泛化（"感情不顺"vs 条目里的"亲密关系"字面不重合）。**两者互补：BM25 管精确、向量管泛化，RRF 融合取长补短。** `ENABLE_BM25=0` 可切回纯向量做对照，面试现场演示差异。
+
+> **无命中兜底**：BM25 全 0 且向量最高分 < `MIN_VEC_SCORE`（0.18）时判定未命中，该路不塞证据，工具返回提示让模型基于通用知识作答并如实说明。**避免 RAG 最常见的幻觉——检索不到就拿弱相关片段硬编。** 前端证据区也会显示"（知识库未命中，该角度由模型基于通用知识作答）"。
 
 ---
 
 ## 二、快速开始
 
 ```bash
-# 1. 安装依赖
 cd langchain-rag-interview
 pip install -r requirements.txt
-
-# 2. 配置 Key（硅基流动一个 Key 同时用于问答和向量化）
 cp .env.example .env
-#    编辑 .env，把 LLM_API_KEY 换成你的硅基流动 Key
-#    地址：https://cloud.siliconflow.cn → 账户管理 → API 密钥
-#    Embedding 的 Key 留空即可，会自动复用同一个 Key（BGE-M3 免费）
-
-# 3. 启动
+#    编辑 .env，填 LLM_API_KEY（硅基流动 Key，问答和向量化共用一个）
 uvicorn app:app --reload --port 8000
 ```
 
-浏览器打开 `http://127.0.0.1:8000`。
+打开 `http://127.0.0.1:8000`，点快捷问题或输入困扰即可。
 
-`.env` 里 `LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash` 是你指定的问答模型（支持工具调用、1M 上下文）。`EMBEDDING_API_KEY` 留空即可，代码自动复用 `LLM_API_KEY`，BGE-M3 在硅基流动免费。想换模型只改 `LLM_MODEL` 和 `LLM_BASE_URL`，代码不用动。
+只验证检索（不调大模型）：
 
-验证链路（不调用大模型，纯本地）：
 ```bash
 python ingest.py
 ```
@@ -56,118 +59,166 @@ python ingest.py
 
 ```
 langchain-rag-interview/
-├── app.py                  # 接口层：FastAPI 路由、SSE 流式输出
-├── agent.py                # Agent 层：@tool 检索工具 + create_agent 编排
-├── ingest.py               # 数据层：加载 -> 切块 -> 向量化 -> 检索器
-├── static/index.html       # 前端：原生聊天界面 + 流式渲染
-├── data/docs/              # 知识库文档（放 .md / .txt 即可被索引）
-│   └── 星云客服云平台_产品手册.md
+├── app.py                  # 接口层：FastAPI 路由、SSE 流式、两路证据接口
+├── agent.py                # 编排层：两路检索工具 + create_agent + 算命人设
+├── ingest.py               # 数据层：加载 -> 切块 -> BM25 + 向量混合检索 -> 两个检索器
+├── static/index.html       # 前端：赛博风格聊天界面 + 两路依据展示
+├── data/docs/              # 两个知识库（文件名 = 类别名）
+│   ├── 心理学.md
+│   └── 易经.md
 ├── requirements.txt
 ├── .env.example
 └── README.md
 ```
 
-**分层讲解口径**（面试时按这个顺序讲，30 秒）：
+**分层讲解口径**（30 秒）：
 
-> 三层结构，从上到下是 `app.py` 接口层、`agent.py` 编排层、`ingest.py` 数据层。接口层只管 HTTP 和流式推送；编排层把检索包装成一个工具交给 `create_agent`，让模型自己决定要不要查知识库；数据层负责把文档变成可检索的向量库。前端是纯原生 HTML，通过 SSE 接收流式回答。
+> 三层结构。数据层 `ingest.py` 把两个 md 文件各建一个向量库，返回两个检索器；编排层 `agent.py` 用一个 `@tool` 把两路检索包起来，交给 `create_agent`，配算命人设；接口层 `app.py` 用 SSE 把答案流式推给前端。前端是纯原生 HTML，还能展开看两路检索依据。
 
 ---
 
-## 四、RAG 链路怎么跑的
+## 四、两路 RAG 数据流
 
 ```
-用户提问
+用户："我失眠、焦虑、压力大"
    │
    ▼
-FastAPI /api/chat ──► create_agent（带对话记忆）
-                          │
-                          ├─ 模型判断：需要查内部资料？
-                          │        │
-                          │        ▼
-                          │   @tool search_knowledge_base
-                          │        │
-                          │        ▼
-                          │   retriever 检索 Top-3 片段
-                          │        │
-                          │        ▼
-                          │   片段作为上下文塞回 Prompt
+FastAPI /api/chat ──► create_agent（算命人设 + 多轮记忆）
                           │
                           ▼
-                    模型基于上下文生成答案
+                  @tool search_oracles
                           │
+              ┌───────────┴───────────┐
+              ▼                       ▼
+         【心理学 Top-2】          【易经 Top-3】
+       BM25 + 向量 RRF          BM25 + 向量 RRF
+      失眠的心理机制            坎卦/大过卦/乾卦
+              └───────────┬───────────┘
                           ▼
-                    SSE 流式推给前端 + 展示检索证据
+              命中 -> 证据；未命中 -> 让模型兜底作答
+                          ▼
+                 证据 + 卦象硬约束回注给模型
+                          ▼
+        DeepSeek-V4-Flash 生成三段式解读：
+        【心理学视角】【易经指引】【玄机建议】
+                          ▼
+                  SSE 流式推给前端
 ```
 
-**索引阶段**（服务启动时执行一次）：`data/docs/*.md` → 按空行分段 → `RecursiveCharacterTextSplitter`（300 字/50 重叠）→ Embedding → `InMemoryVectorStore`。
+**关键设计**：为什么两个库分开建、而不是混在一起？
+
+- 混在一起检索，某一路（比如易经 63 条）可能刷屏占满 Top-K，心理学那路没机会出现。
+- 分库后每路独立取 Top-K（心理学 2、易经 3），保证两个视角**都出现在证据里**，模型才能综合。
+- 心理学问题更聚焦，Top-2 去掉弱相关尾巴（实测第 3 条常是"陪跑"，反而干扰模型）；易经需要多几个卦象供模型挑选用哪个最贴合。
+
+**另一个关键点**：易经的"坎卦"条目里主动写了"失眠、焦虑、压力、忧虑、心神不宁"这些现代词。因为用户说"我失眠"，纯卦辞里没有这个词，向量检索很难关联到坎卦。这是**知识库内容设计**，不用写复杂代码。
+
+**语料规模**：心理学 22 条、易经 63 条（补全到 64 卦）。扩充语料后冷门问题命中明显改善——"考试紧张"命中"考试焦虑与表现焦虑"、"分手纠结"命中"依恋类型与决策纠结"、"工作没用感"命中"职业倦怠与自我怀疑"，易经也能关联到讼卦（纷争）、蛊卦（积弊整治）、震卦（惊惧）等对应卦象。条目里埋同义词也很关键（如"依恋关系"条目写了"分手、被抛弃、患得患失"），因为用户可能用不同说法描述同一件事。
 
 ---
 
-## 五、 LangChain 1.0 的关键写法（面试重点）
+## 五、LangChain 1.0 关键写法（面试重点）
 
-你学完教程后，这个项目用的就是 1.0 新 API，和网上 0.x 教程完全不同：
+| 能力        | 0.x 老写法                            | 本项目（1.0）                                        |
+| --------- | ---------------------------------- | ----------------------------------------------- |
+| 模型初始化     | `ChatOpenAI(...)`                  | `init_chat_model(..., model_provider="openai")` |
+| Agent     | `create_react_agent`               | `langchain.agents.create_agent`                 |
+| Prompt    | `prompt=`                          | `system_prompt=`                                |
+| 记忆        | `ConversationBufferMemory`         | `checkpointer=InMemorySaver()` + `thread_id`    |
+| 检索接入      | `RetrievalQA`                      | 检索包成 `@tool`，Agent 调用                           |
+| Embedding | `langchain_community.embeddings.X` | `langchain-core` 的 `Embeddings` 子类              |
 
-| 能力 | 0.x 老写法（网上大部分项目） | 本项目（1.0） |
-|---|---|---|
-| 模型初始化 | `ChatOpenAI(...)` 直接实例化 | `init_chat_model(..., model_provider="openai")` 统一工厂 |
-| Agent | `langgraph.prebuilt.create_react_agent` | `langchain.agents.create_agent` |
-| Prompt | `prompt=` 参数 | `system_prompt=` 参数 |
-| 记忆 | `ConversationBufferMemory` | `checkpointer=InMemorySaver()` + `thread_id` |
-| 检索接入 | `RetrievalQA` / `ConversationalRetrievalChain` | 检索包成 `@tool`，交给 Agent 调用 |
-| Embedding | `langchain_community.embeddings.XXX` | `langchain-core` 的 `Embeddings` 子类 / `langchain_openai` |
+**记忆口诀**：`model_provider` 决定协议，`base_url` 决定地址，`model` 决定模型，`api_key` 决定凭证。
 
-**一句话记忆法**：`model_provider` 决定请求协议，`base_url` 决定请求地址，`model` 决定实际模型，`api_key` 决定凭证。换厂商只改这四个。
+**推理模型坑**：V4-Flash 是推理模型，`AIMessage.content` 可能是内容块列表（reasoning + text）而非字符串。`app.py` 的 `extract_text()` 只取 `type == "text"` 的块，否则 SSE 什么都不推、前端一直转圈。
 
 ---
 
 ## 六、面试高频问题 & 回答要点
 
 **1. 讲一下这个项目？**
-> 一句话：企业知识库问答。前端提问 → FastAPI → LangChain 1.0 Agent → 调用检索工具拿文档片段 → DeepSeek 基于片段作答 → SSE 流式返回。三个 Python 文件分别对应数据层、编排层、接口层。
 
-**2. RAG 是什么，为什么要用？**
-> 大模型不知道企业私有数据，直接微调成本高、更新慢。RAG 在生成前先检索相关资料塞进上下文，让模型"开卷考试"。优点是知识更新只需改文档、可溯源（本项目前端能看检索片段）、成本低。
+> 赛博算命知识库。用户说困扰 → FastAPI → LangChain 1.0 Agent → 调用两路检索工具 → DeepSeek 综合成三段式解读 → SSE 流式返回。三个 Python 文件对应数据层、编排层、接口层。
 
-**3. 文档为什么要切块？chunk_size 怎么定？**
-> 两个原因：一是模型上下文窗口有限；二是整篇文档向量化会稀释语义，检索精度下降。项目用 `RecursiveCharacterTextSplitter`，300 字一块、50 字重叠，重叠是为了避免一个完整语义被切断。实际要按文档类型调：FAQ 可以小一些，论文可以大一些。
+**2. 和普通单库 RAG 比，你的创新点是什么？**
 
-**4. 为什么把检索包成 `@tool` 给 Agent，而不是直接 LCEL 串 `retriever | prompt | model`？**
-> LCEL 链是"每次必查"，简单直接但不够灵活。包成工具后，模型自己判断要不要查：问"公司产品功能"会调用检索，问"帮我写个 for 循环"就直接用通用知识回答。代价是引入一次工具调用的延迟和不确定性，所以我在 system prompt 里明确规定了何时必须调用。
+> 多路检索 + 结果融合。单库 RAG 只能从一个角度回答；这个把心理学、易经分成两个独立检索库，每库内部用 BM25 + 向量 RRF 混合检索，心理学取 Top-2、易经取 Top-3，拼成结构化证据给模型，输出两个视角。分库而不是混库，是为了避免某一路刷屏。
 
-**5. LangChain 1.0 相比 0.x 改了什么？**
-> 主包收敛到 Agent 核心能力；老链和部分 Retriever 移到 `langchain-classic`；`create_react_agent` 被 `create_agent` 取代；提示词参数改名 `system_prompt`；记忆改用 checkpointer；流式节点名从 `agent` 变成 `model`。
+**3. 为什么把知识库分开建索引？**
 
-**6. DeepSeek 没有 embedding 接口，你怎么解决的？**
-> 做了双模式降级。默认用本地字符 bigram 哈希向量，零成本把"加载→切块→向量化→检索→生成"整条链路跑通；配了 SiliconFlow Key 就用 BGE-M3 语义向量。BGE 查询侧还要加指令前缀，文档侧不加，这是训练方式决定的。
+> 两个原因：一是每路各取 Top-K，保证两个视角都出现；二是解耦，换掉或新增一个知识库只动一个文件。混库检索的话，相似度高的那一路会占满结果。
 
-**7. 为什么用内存向量库，不用 Chroma / Milvus？**
-> 项目定位是面试演示，文档量只有几十 KB，内存库启动即建、零外部服务，面试官clone下来不用装数据库就能跑。真实项目我会换 Chroma 或 pgvector 做持久化，并加增量索引，避免每次重启全量重建。
+**3-补充. 为什么只有两路？是不是少做了？**
 
-**8. 多轮对话怎么实现的？**
-> `create_agent` 配 `InMemorySaver` 作 checkpointer，前端每次带同一个 `thread_id`，历史消息由框架自动注入。注意生产环境要换成数据库持久化，否则服务重启记忆就丢了。
+> 不是能力问题，是产品取舍。早期做过"周公解梦"第三路，但多数用户不带梦境来提问，解梦视角经常答非所问。RAG 的知识库要贴合真实问题分布，不是越多越好。现在心理学（科学解释）+ 易经（玄学意象）一理一玄，覆盖绝大多数情绪困扰。面试讲这个能体现你不只会堆技术，还懂从用户场景倒推设计。
 
-**9. 怎么防止模型胡编？**
-> 三层约束：system prompt 要求"只依据检索内容作答，检索不到就明说不知道"；检索结果带来源文件名，模型要输出"参考来源"；前端展示原始检索片段，人工可核对。
+**4. 用户说"失眠"，怎么关联到易经的"坎卦"？**
 
-**10. 流式输出怎么做的？**
-> 后端 `/api/chat` 返回 `StreamingResponse`，用 `agent.stream(..., stream_mode="values")` 逐步拿 AI 消息，做增量 diff 后按 SSE `data:` 格式推送；前端用 `ReadableStream` 逐块解析并追加到气泡里。异常也通过 SSE 推 `error` 事件，避免前端一直转圈。
+> 两层：一是检索能匹配"失眠、焦虑、压力"和坎卦释义里的描述；二是在知识库内容里，坎卦条目主动写了这些现代词——这是内容设计技巧，比改算法简单有效。面试强调这点说明你懂 RAG 的效果瓶颈常在语料而非算法。
 
-**11. 检索不到相关内容怎么办？**
-> 工具返回固定提示"知识库中没有检索到相关内容"，system prompt 要求模型如实告知而不是编造。进一步优化可以设相似度阈值、做 query 改写或多路召回。
+**5. RAG 是什么，为什么用？**
 
-**12. 项目有什么不足，怎么改进？**
-> 三点：一是内存向量库不持久化；二是没有 rerank，Top-3 直接进 prompt，可以接 BGE-reranker 重排；三是没有做 query 改写和混合检索，后续可以加 BM25 + 向量混合召回。
+> 大模型不知道私有/特定领域知识，微调成本高更新慢。RAG 在生成前先检索资料塞进上下文，让模型"开卷考试"。优点是知识更新只改文档、可溯源、成本低。
+
+**6. 为什么切块？chunk_size 怎么定？**
+
+> 上下文窗口有限；整篇向量化会稀释语义。用 `RecursiveCharacterTextSplitter`，300 字/50 重叠，重叠避免语义被切断。这个文件条目短，实际每块就是一个条目。
+
+**7. 为什么把检索包成 `@tool` 而不是 LCEL 链？**
+
+> 包成工具后模型自己判断要不要检索、检索什么。问困扰就调用，问"你是谁"就不调用。代价是工具调用的延迟和不确定性，所以在 system prompt 里明确规定了何时必须调用。
+
+**8. LangChain 1.0 相比 0.x 改了什么？**
+
+> 主包收敛到 Agent 核心；老链移到 `langchain-classic`；`create_react_agent` 被 `create_agent` 取代；`prompt` 改名 `system_prompt`；记忆改用 checkpointer；流式节点名从 `agent` 变 `model`。
+
+**9. DeepSeek 没有 embedding 怎么办？为什么默认用本地哈希而不用 BGE？**
+
+> 双模式（`.env` 的 `EMBEDDING_MODE`）：`local` 本地字符 bigram 哈希、`bge` 硅基流动 BAAI/bge-m3。  
+> 关键实测结论：本项目是短条目 + 冷门关键词场景，BGE-M3 对 100 字中文短条目区分度不足——所有条目两两相似度约 0.66，某几条会通吃几乎所有 query；本地哈希靠字面重合，对"牙齿掉落""考试焦虑"这类词精准命中。**面试强调：语义向量不是万能的，短文本 + 关键词场景用字符哈希/ BM25 往往更稳，选型要看数据特征。** BGE 查询侧加指令前缀、文档侧不加，是训练方式决定的（保留在代码里供对比讲解）。
+
+**9b. 为什么要上 BM25 混合检索？RRF 是什么？**
+
+> 起因：用户反馈"心理学后两条依据和回答相似度不大"——纯向量（本地哈希）的 Top-3 分数是 0.396/0.243/0.147，递减平缓，后两条是弱相关"陪跑"，硬塞进去反而干扰模型。  
+> 解法：加 BM25（Okapi 公式，自实现，中文用字符 bigram 免分词）。它的 IDF 会压低每条都有的模板词（"焦虑/压力"），不相关条目直接 0 分——实测"考试紧张"给 18.07/5.29/2.83/0，区分度远超向量。  
+> 但 BM25 抓不到语义（"感情不顺" vs 条目"亲密关系"字面不重合），所以两路都要：**RRF 融合**按排名算 `Σ1/(60+rank)`，只用排名不用分数，规避两种分数尺度不一致的问题，且实现简单、效果稳。`ENABLE_BM25=0` 可切回纯向量做 A/B 对比。  
+> **延伸——无命中兜底**：BM25 全 0 且向量分 < 0.18 时判定未命中，不塞证据，让模型用通用知识作答并如实说明。这直接回应了 RAG 的核心风险：检索不到时硬编 = 幻觉。
+
+**10. 多轮对话怎么实现？**
+
+> `create_agent` 配 `InMemorySaver` 作 checkpointer，前端每次带同一个 `thread_id`，框架自动注入历史。生产环境要换数据库持久化。
+
+**11. 怎么防止模型胡编？怎么保证回答和"卜卦依据"对得上？**
+
+> 这是踩过坑的点。最初前端"卜卦依据"单独调 `/api/retrieve`，和 Agent 内部检索是两次独立调用；而且模型会凭《易经》记忆说出证据里没有的卦象（证据给恒卦，回答却说临卦、革卦）。两处修法：
+> ① **同源**：`/api/chat` 在 SSE 流里捕获工具消息（ToolMessage），把 Agent **本轮实际用到**的证据通过 `evidence` 事件回传前端展示，不再单独查一次。多轮会话下还要靠消息 ID 过滤掉历史工具消息，只认本轮新增的，否则展示的是上一轮证据。
+> ② **硬约束**：工具返回内容末尾附上"本次可用卦象列表"，system prompt 加铁律禁止引用证据外的卦象。
+> 面试价值：这体现了对 RAG 输出一致性（答案可溯源、证据与生成对齐）的重视，而不只是"能跑就行"。
+
+**12. 流式输出怎么做的？**
+
+> 后端 `/api/chat` 返回 `StreamingResponse`，`agent.stream(..., stream_mode="values")` 逐步拿 AI 消息，做增量 diff 后按 SSE `data:` 推送；同时先推一个 `evidence` 事件带本轮检索证据。前端 `ReadableStream` 逐块解析追加。异常也走 SSE，避免前端一直转圈。
+
+**13. 为什么用内存向量库，不用 Chroma/Milvus？**
+
+> 面试项目语料约百条，内存库启动即建、零外部服务，够用。真实项目换 Chroma/pgvector 做持久化，加增量索引。
+
+**14. 有什么不足，怎么改进？**
+
+> 一是内存库不持久化；二是 RRF 融合是粗粒度排名融合，可以加 reranker 做精排；三是检索词依赖模型改写（如"牙齿掉了"→"梦见牙齿掉落的心理含义与卦象"），改写质量影响召回，可加 query 改写模块；四是本地哈希/ BM25 都不理解语义，要真语义泛化得换 BGE（已在代码里保留开关）。另外 BM25 的中文 bigram 是免分词的轻量方案，生产环境可换 jieba 分词 + 领域词典。面试把这几点说清，说明你知道项目的边界在哪。
+
+
 
 ---
 
-## 七、可扩展方向（面试官问"还能怎么改"时说）
+## 七、可扩展方向
 
 - 换持久化向量库（Chroma / pgvector），支持文档增删改
-- 加 reranker 模型做二次排序，提升 Top-K 质量
-- Query 改写 + 多路召回（BM25 + 向量）
-- 上传文档接口，前端做文件管理
-- 接 LangSmith 做链路追踪，统计检索命中率
-- 加相似度阈值，低于阈值直接拒答
+- 加 reranker 对两路结果统一重排
+- Query 改写：LLM 把用户口语拆成两个知识库各自的检索词
+- 需要时加回第三路（如星座、塔罗），按用户问题分布决定
+- 上传文档接口，前端做知识库管理
+- 接 LangSmith 做链路追踪，统计每路命中率
 
 ---
 
