@@ -7,3 +7,5 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+# Chroma 持久化数据（运行时生成，文档变更会自动重建）
+data/chroma_db/

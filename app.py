@@ -8,6 +8,7 @@ FastAPI 接口层（赛博算命）：
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -69,6 +70,57 @@ def extract_text(content) -> str:
             if isinstance(block, dict) and block.get("type") == "text"
         )
     return ""
+
+
+def load_gua_whitelist() -> set[str]:
+    """从易经语料提取全部合法卦名，用来区分"三卦/此卦"这类量词和真正的卦名。"""
+    path = BASE_DIR / "data" / "docs" / "易经.md"
+    if not path.exists():
+        return set()
+    text = path.read_text(encoding="utf-8")
+    return set(re.findall(r"^##\s*([\u4e00-\u9fff]{1,4}卦)", text, re.M))
+
+
+GUA_WHITELIST = load_gua_whitelist()
+# 用白名单构造精确匹配式（长的在前，避免"过卦"抢先于"大过卦"）。
+# 不能用 [\u4e00-\u9fff]{1,4}卦 这种宽正则：它会把"正应震卦"贪婪匹配成"应震卦"而漏网。
+_GUA_RE = re.compile("|".join(sorted((re.escape(g) for g in GUA_WHITELIST), key=len, reverse=True))) \
+    if GUA_WHITELIST else None
+
+
+def anchor_gua_names(text: str, allowed: list[str]) -> str:
+    """把回答里证据外的卦名替换成证据里的卦（按顺序对应）。
+
+    推理模型会凭记忆"回忆"卦象，prompt 约束压不住。这里在输出层做硬锚定：
+    回答中的卦名只能来自本次检索证据，保证界面看到的依据与解读逐字一致。
+    - allowed 为空（未命中）：具体卦名一律换成"未得明确卦象"。
+    - allowed 非空：第 k 个出现的卦名 -> allowed[k % len(allowed)]（循环对应）。
+    """
+    if _GUA_RE is None:
+        return text
+    counter = [0]
+
+    def repl(m: re.Match) -> str:
+        if not allowed:                 # 未命中：具体卦名一律换成模糊说法
+            return "未得明确卦象"
+        idx = counter[0] % len(allowed)
+        counter[0] += 1
+        return allowed[idx]
+
+    return _GUA_RE.sub(repl, text)
+
+
+def allowed_gua_from_evidence(groups: list[dict]) -> list[str]:
+    """从证据 groups 的【易经】条目里抽出本次命中的卦名，保持展示顺序。"""
+    allowed: list[str] = []
+    for g in groups:
+        if g.get("category") != "易经" or not g.get("hit"):
+            continue
+        for d in g.get("docs", []):
+            m = re.match(r"\s*([\u4e00-\u9fff]{1,4}卦)", d.get("content", ""))
+            if m and m.group(1) in GUA_WHITELIST:
+                allowed.append(m.group(1))
+    return allowed
 
 
 def parse_tool_evidence(raw: str) -> list[dict]:
@@ -134,7 +186,9 @@ def chat(req: ChatRequest):
             seen_tool_ids = set()
 
         sent = ""
+        anchored_sent = ""                # 已推送的锚定后文本，用于计算增量
         evidence_sent = False
+        allowed_gua: list[str] = []       # 本轮证据里命中的卦，用于输出层硬锚定
         try:
             for state in agent.stream(
                 {"messages": [{"role": "user", "content": req.question}]},
@@ -157,6 +211,7 @@ def chat(req: ChatRequest):
                         raw = extract_text(getattr(msg, "content", ""))
                         groups = parse_tool_evidence(raw)
                         if groups:
+                            allowed_gua = allowed_gua_from_evidence(groups)
                             yield event({"evidence": groups})
                             evidence_sent = True
                             if mid:
@@ -169,9 +224,13 @@ def chat(req: ChatRequest):
                 content = extract_text(last.content)
                 if not content or not content.startswith(sent):
                     continue
-                delta = content[len(sent) :]
+                sent = content
+                # 输出层硬锚定：模型凭记忆回忆的证据外卦名，替换成本轮真正命中的卦。
+                # 对累积全文锚定后再取增量，保证卦名按顺序稳定对应，不因流式切片错位。
+                anchored = anchor_gua_names(content, allowed_gua)
+                delta = anchored[len(anchored_sent) :] if anchored.startswith(anchored_sent) else anchored
+                anchored_sent = anchored
                 if delta:
-                    sent = content
                     yield event({"delta": delta})
             yield event({"done": True})
         except Exception as exc:  # 流式接口要把异常也推给前端，否则前端一直转圈

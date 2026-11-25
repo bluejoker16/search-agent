@@ -17,6 +17,7 @@
 | 模型初始化    | `init_chat_model`                    | 1.x                           |
 | 检索工具化    | `@tool` + 两个混合检索器                | langchain-core 1.x            |
 | **混合检索**  | **BM25（自实现）+ 向量，RRF 融合**        | 零新依赖                         |
+| **向量库**    | **Chroma 本地持久化（sqlite）**           | chromadb 1.x                  |
 | 文档切块     | `RecursiveCharacterTextSplitter`     | langchain-text-splitters      |
 | Web 框架   | FastAPI + uvicorn                    | 0.110+                        |
 | 前端       | 原生 HTML / CSS / JS + SSE             | 零构建                           |
@@ -26,8 +27,15 @@
 每一路知识库内部都不是单一检索，而是两路结果用 **RRF（Reciprocal Rank Fusion）** 融合：
 
 - **BM25**（`ingest.py` 自实现，零新依赖）：字面精确匹配，靠 IDF 压低"焦虑/压力"这类每条都有的模板词权重。实测区分度极强——不相关条目直接 0 分。
-- **向量**：`EMBEDDING_MODE` 可选 `local`（本地字符 bigram 哈希，默认）或 `bge`（硅基流动 bge-m3 语义向量），负责语义泛化（如"感情不顺"→"亲密关系焦虑"）。
+- **向量**：`EMBEDDING_MODE` 可选 `local`（本地字符 bigram 哈希，默认）或 `bge`（硅基流动 bge-m3 语义向量），负责语义泛化（如"感情不顺"→"亲密关系焦虑"）。向量存在 **Chroma 本地持久化库**（`data/chroma_db/`，sqlite 文件）。
 - **RRF 融合**：`score(d) = Σ 1/(60 + rank)`，只用排名不用分数，天然规避 BM25 与 cosine 分数尺度不一致的问题。
+
+**持久化设计**（这是本版重点）：
+
+- 两个知识库各一个 Chroma collection，存在 `data/chroma_db/`。**首次运行 embed 入库，之后重启直接加载，不再重复调 embedding。**
+- 每个 collection 的 metadata 里存**文档签名**（所有块内容 + embedding 配置的 md5）。启动时对比签名：一致就复用，不一致（改了 md 或换了 embedding 模式）就只重建那一个 collection——**增量更新，不动其他库**。
+- **Chroma 返回距离（越小越近），与内存库的相似度方向相反**。代码里 `_distance_to_similarity()` 用 `sim = 1 - dist/2` 换算（归一化向量下平方 L2 距离 = 2−2cos），让 `MIN_VEC_SCORE` 阈值语义不变。这是接入向量库时最容易踩的坑。
+- 强制全量重建：`python ingest.py --rebuild`。
 
 > **为什么混合**：实测纯本地哈希对"考试紧张"返回 0.396/0.243/0.147——后两条分数接近、弱相关，硬塞进 Top-3 反而干扰模型；BM25 给的是 18.07/5.29/2.83/0，不相关直接归零。但 BM25 抓不到语义泛化（"感情不顺"vs 条目里的"亲密关系"字面不重合）。**两者互补：BM25 管精确、向量管泛化，RRF 融合取长补短。** `ENABLE_BM25=0` 可切回纯向量做对照，面试现场演示差异。
 
@@ -50,8 +58,11 @@ uvicorn app:app --reload --port 8000
 只验证检索（不调大模型）：
 
 ```bash
-python ingest.py
+python ingest.py              # 首次建库 / 之后复用，打印每库命中情况
+python ingest.py --rebuild    # 强制重建所有 collection
 ```
+
+> 第一次启动会在 `data/chroma_db/` 建库（本地哈希模式零成本；用 bge 模式会调一次 embedding API）。之后重启直接读磁盘，秒起。`data/chroma_db/` 已加入 `.gitignore`。
 
 ---
 
@@ -61,11 +72,12 @@ python ingest.py
 langchain-rag-interview/
 ├── app.py                  # 接口层：FastAPI 路由、SSE 流式、两路证据接口
 ├── agent.py                # 编排层：两路检索工具 + create_agent + 算命人设
-├── ingest.py               # 数据层：加载 -> 切块 -> BM25 + 向量混合检索 -> 两个检索器
+├── ingest.py               # 数据层：加载 -> 切块 -> Chroma 持久化 -> BM25 + 向量混合检索
 ├── static/index.html       # 前端：赛博风格聊天界面 + 两路依据展示
 ├── data/docs/              # 两个知识库（文件名 = 类别名）
 │   ├── 心理学.md
 │   └── 易经.md
+├── data/chroma_db/         # Chroma 持久化向量库（运行时生成，已 gitignore）
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -192,20 +204,28 @@ FastAPI /api/chat ──► create_agent（算命人设 + 多轮记忆）
 
 > 这是踩过坑的点。最初前端"卜卦依据"单独调 `/api/retrieve`，和 Agent 内部检索是两次独立调用；而且模型会凭《易经》记忆说出证据里没有的卦象（证据给恒卦，回答却说临卦、革卦）。两处修法：
 > ① **同源**：`/api/chat` 在 SSE 流里捕获工具消息（ToolMessage），把 Agent **本轮实际用到**的证据通过 `evidence` 事件回传前端展示，不再单独查一次。多轮会话下还要靠消息 ID 过滤掉历史工具消息，只认本轮新增的，否则展示的是上一轮证据。
-> ② **硬约束**：工具返回内容末尾附上"本次可用卦象列表"，system prompt 加铁律禁止引用证据外的卦象。
-> 面试价值：这体现了对 RAG 输出一致性（答案可溯源、证据与生成对齐）的重视，而不只是"能跑就行"。
+> ② **prompt 硬约束**：工具返回末尾附"本次可用卦象列表"，system prompt 加铁律禁止引用证据外的卦象。
+> ③ **输出层硬锚定（关键）**：实测发现 ② 对推理模型压不住——用 8 道题验证，模型仍有 6 道会"凭记忆回忆"出证据外的卦（证据给临卦，回答却冒出震卦）。**根因是生成模型固有的知识幻觉，光靠提示词约束不可靠**。于是在 SSE 输出层加 `anchor_gua_names()`：从本轮证据抽出命中卦名作为白名单，把回答里出现的每个卦名按出现顺序映射回白名单；未命中时把所有卦名换成"未得明确卦象"。修复后同样 8 道题，卦名全部落在证据内（8/8）。
+> 两个实现细节：卦名匹配用**语料提取的 63 卦白名单构造精确正则**，不能用 `[\u4e00-\u9fff]{1,4}卦` 这种宽正则——后者会把"正应震卦"贪婪匹配成"应震卦"而漏网；锚定作用在**累积全文**上再算增量，避免流式切片导致卦名映射错位。
+> 面试价值：这体现了对 RAG 输出一致性（答案可溯源、证据与生成对齐）的重视。** deeper 一层：当 prompt 工程到极限仍压不住幻觉时，用确定性的工程手段在输出层兜底——这是从"调提示词"到"系统设计"的思路升级**，是很能体现工程成熟度的加分点。
 
 **12. 流式输出怎么做的？**
 
 > 后端 `/api/chat` 返回 `StreamingResponse`，`agent.stream(..., stream_mode="values")` 逐步拿 AI 消息，做增量 diff 后按 SSE `data:` 推送；同时先推一个 `evidence` 事件带本轮检索证据。前端 `ReadableStream` 逐块解析追加。异常也走 SSE，避免前端一直转圈。
 
-**13. 为什么用内存向量库，不用 Chroma/Milvus？**
+**13. 为什么用 Chroma？怎么处理向量库的持久化和更新？**
 
-> 面试项目语料约百条，内存库启动即建、零外部服务，够用。真实项目换 Chroma/pgvector 做持久化，加增量索引。
+> 最初用的是内存向量库（启动即建），但每次重启都要重新 embed 全部文档；换 BGE 模式时还会重复调 embedding API，既慢又费钱。换成 Chroma 本地持久化（底层 sqlite，零外部服务），首次建库后重启直接加载。
+>
+> 更新用**签名机制**：每个 collection 的 metadata 存"所有块内容 + embedding 配置"的 md5，启动时对比——一致就复用，不一致只重建那一个 collection。实测改心理学 md 只重建心理学库，易经库继续复用。强制重建用 `python ingest.py --rebuild`。
+>
+> **面试要主动提的坑**：Chroma 的 `similarity_search_with_score` 返回的是**距离**（越小越近），和内存库的余弦相似度（越大越近）方向相反。如果无命中兜底的阈值不换算，判断会完全反掉。本项目用 `sim = 1 - dist/2`（归一化向量下平方 L2 距离 = 2−2cos）统一成相似度，阈值语义保持不变。面试官问"你踩过什么坑"，这个很实在。
+>
+> 生产环境语料上规模后，可换 pgvector / Milvus，但接口（VectorStore）不变，改动集中在数据层。
 
 **14. 有什么不足，怎么改进？**
 
-> 一是内存库不持久化；二是 RRF 融合是粗粒度排名融合，可以加 reranker 做精排；三是检索词依赖模型改写（如"牙齿掉了"→"梦见牙齿掉落的心理含义与卦象"），改写质量影响召回，可加 query 改写模块；四是本地哈希/ BM25 都不理解语义，要真语义泛化得换 BGE（已在代码里保留开关）。另外 BM25 的中文 bigram 是免分词的轻量方案，生产环境可换 jieba 分词 + 领域词典。面试把这几点说清，说明你知道项目的边界在哪。
+> 一是 Chroma 单机 sqlite 不适合分布式/大规模，生产换 pgvector/Milvus；二是 RRF 融合是粗粒度排名融合，可以加 reranker 做精排；三是检索词依赖模型改写（如"牙齿掉了"→"梦见牙齿掉落的心理含义与卦象"），改写质量影响召回，可加 query 改写模块；四是本地哈希/BM25 都不理解语义，要真语义泛化得换 BGE（已在代码里保留开关）。另外 BM25 的中文 bigram 是免分词的轻量方案，生产环境可换 jieba 分词 + 领域词典。面试把这几点说清，说明你知道项目的边界在哪。
 
 
 
@@ -213,7 +233,7 @@ FastAPI /api/chat ──► create_agent（算命人设 + 多轮记忆）
 
 ## 七、可扩展方向
 
-- 换持久化向量库（Chroma / pgvector），支持文档增删改
+- 换 pgvector / Milvus 支持更大规模；加文档增删改的管理接口（目前改 md 靠签名自动检测）
 - 加 reranker 对两路结果统一重排
 - Query 改写：LLM 把用户口语拆成两个知识库各自的检索词
 - 需要时加回第三路（如星座、塔罗），按用户问题分布决定
